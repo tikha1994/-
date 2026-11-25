@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>نظام ERP</title>
+<style>
+:root{--bg:#eef1ee;--c:#fff;--t:#17231f;--m:#66736d;--p:#14604f;--p2:#e3f0ec;--b:#d9dfdb;--r:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Tahoma,Arial,sans-serif;background:var(--bg);color:var(--t);font-size:15px}
+header{background:var(--p);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+header h1{margin:0;font-size:18px}#who{margin-inline-start:auto;font-size:13px}
+nav{display:flex;gap:4px;padding:8px 12px;background:var(--c);border-bottom:1px solid var(--b);overflow-x:auto}
+nav button{border:0;background:none;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit;color:var(--m);white-space:nowrap}
+nav button.on{background:var(--p2);color:var(--p);font-weight:700}
+main{max-width:1000px;margin:16px auto;padding:0 12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:16px}
+.card,.box{background:var(--c);border:1px solid var(--b);border-radius:8px;padding:14px}
+.card small{color:var(--m);display:block;margin-bottom:6px}.card b{font-size:22px}
+.box{margin-bottom:14px}h2{margin:0 0 10px;font-size:16px}
+form{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:8px}
+label{display:flex;flex-direction:column;font-size:12px;color:var(--m);gap:3px;flex:1;min-width:120px}
+input,select{font:inherit;padding:8px;border:1px solid var(--b);border-radius:6px;background:#fff;color:var(--t)}
+input:focus,select:focus,button:focus-visible{outline:2px solid var(--p);outline-offset:1px}
+.btn{background:var(--p);color:#fff;border:0;padding:9px 16px;border-radius:6px;cursor:pointer;font:inherit}
+.g{background:rgba(255,255,255,.18);padding:6px 12px}
+.del,.pr,.lk{background:none;border:0;cursor:pointer;font:inherit}.del{color:var(--r)}.pr,.lk{color:var(--p)}
+.sc{overflow-x:auto}table{width:100%;border-collapse:collapse}
+th,td{padding:8px;text-align:start;border-bottom:1px solid var(--b);white-space:nowrap}
+th{color:var(--m);font-weight:600;font-size:13px}.low{color:var(--r);font-weight:700}.m{color:var(--m)}
+.auth{max-width:380px;margin:40px auto}.auth form{flex-direction:column;align-items:stretch}
+</style>
+</head>
+<body>
+<header><h1>نظام ERP</h1><span id="who"></span><button class="btn g" id="out" hidden>خروج</button></header>
+<nav id="nav"></nav>
+<main id="app"></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+/* ===== ضع بيانات مشروعك من Supabase: Project Settings -> API ===== */
+const CFG={URL:'https://hdvkqyrpgmwnayeaipdp.supabase.co',KEY:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhkdmtxeXJwZ213bmF5ZWFpcGRwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU2MDc1NjQsImV4cCI6MjExMTE4MzU2NH0.AvLJH81GXL0gYJj21JOHYyevFWfpiWyBGaow5rc6vBE'};
+
+const $=s=>document.querySelector(s);
+const E=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const N=v=>(+v||0).toLocaleString('en-US',{maximumFractionDigits:2});
+const D8=d=>new Date(d).toLocaleDateString('en-GB');
+const sum=(a,k)=>a.reduce((t,x)=>t+(+x[k]||0),0);
+const sb=supabase.createClient(CFG.URL,CFG.KEY);
+let me=null,tab='dash',mode='login',P=[],LAST=[];
+
+const ROLES={admin:'مدير',sales:'مبيعات',accountant:'محاسب',viewer:'عرض فقط'};
+const TABS=[['dash','الرئيسية'],['sales','المبيعات'],['purchases','المشتريات'],['sret','مرتجع مبيعات'],['pret','مرتجع مشتريات'],['debts','الديون والتحصيل'],['products','المخزون'],['customers','العملاء'],['suppliers','الموردون'],['expenses','المصروفات'],['reports','التقارير'],['users','المستخدمون']];
+const PERM={admin:null,sales:['dash','sales','sret','debts','customers','products'],accountant:['dash','purchases','pret','debts','suppliers','expenses','reports','products'],viewer:TABS.map(t=>t[0]).filter(t=>t!=='users')};
+const WR={sales:['sales','sret','debts','customers'],accountant:['purchases','pret','debts','suppliers','expenses','products']};
+const can=t=>!PERM[me.role]||PERM[me.role].includes(t);
+const wr=t=>me.role==='admin'||(WR[me.role]||[]).includes(t);
+const SCHEMA={
+  customers:{t:'العملاء',f:[['name','الاسم'],['phone','الهاتف']]},
+  suppliers:{t:'الموردون',f:[['name','الاسم'],['phone','الهاتف']]},
+  products:{t:'المنتجات والمخزون',f:[['name','اسم المنتج'],['price','سعر البيع','n'],['cost','التكلفة','n'],['opening_qty','الرصيد الافتتاحي','n'],['min_qty','حد الطلب','n']],
+    show:[['name','المنتج'],['price','سعر البيع','n'],['cost','التكلفة','n'],['qty','المتاح','n'],['min_qty','حد الطلب','n']]},
+  expenses:{t:'المصروفات',f:[['description','البيان'],['amount','المبلغ','n']]}
+};
+const IV={
+  sales:{nm:'فاتورة بيع',lab:'العميل',party:'customers',tbl:'sales',items:'sale_items',rpc:'create_sale',unit:'سعر الوحدة',pr:'price'},
+  purchases:{nm:'فاتورة شراء',lab:'المورد',party:'suppliers',tbl:'purchases',items:'purchase_items',rpc:'create_purchase',unit:'تكلفة الوحدة',pr:'cost'},
+  sret:{nm:'مرتجع مبيعات',lab:'العميل',party:'customers',tbl:'sale_returns',items:'sale_return_items',rpc:'create_sale_return',unit:'سعر الوحدة',pr:'price'},
+  pret:{nm:'مرتجع مشتريات',lab:'المورد',party:'suppliers',tbl:'purchase_returns',items:'purchase_return_items',rpc:'create_purchase_return',unit:'تكلفة الوحدة',pr:'cost'}
+};
+const cart=Object.fromEntries(Object.keys(IV).map(k=>[k,{items:[],party:'',paid:''}]));
+
+const get=async p=>{const {data,error}=await p;if(error){alert(error.message);return[]}return data||[]};
+const run=async p=>{const {error}=await p;if(error){alert(error.message);return false}return true};
+const tbl=(h,rows)=>`<div class="sc"><table><tr>${h.map(x=>`<th>${x}</th>`).join('')}<th></th></tr>${rows.join('')||'<tr><td colspan="9" class="m">لا توجد بيانات بعد</td></tr>'}</table></div>`;
+const del=(k,id)=>wr(k)?`<td><button class="del" data-del="${k}:${id}">حذف</button></td>`:'<td></td>';
+const opts=(a,l)=>a.map(x=>`<option value="${x.id}">${E(x.name)}${l?l(x):''}</option>`).join('');
+const field=(n,l,a='')=>`<label>${l}<input name="${n}" ${a}></label>`;
+
+/* ---------- views ---------- */
+const V={
+  async dash(){
+    const m=await get(sb.from('monthly_report').select('*')),st=await get(sb.from('stock').select('*')),cb=await get(sb.from('customer_balances').select('balance'));
+    const s=sum(m,'sales'),p=sum(m,'purchases'),e=sum(m,'expenses'),low=st.filter(x=>x.qty<=x.min_qty);
+    return `<div class="cards"><div class="card"><small>المبيعات</small><b>${N(s)}</b></div><div class="card"><small>المشتريات</small><b>${N(p)}</b></div><div class="card"><small>المصروفات</small><b>${N(e)}</b></div><div class="card"><small>صافي الربح</small><b>${N(s-p-e)}</b></div><div class="card"><small>مستحق على العملاء</small><b>${N(cb.reduce((a,x)=>a+Math.max(+x.balance,0),0))}</b></div><div class="card"><small>قيمة المخزون</small><b>${N(st.reduce((a,x)=>a+x.qty*x.cost,0))}</b></div></div>
+    <div class="box"><h2>منتجات تحتاج إعادة طلب</h2>${low.length?tbl(['المنتج','المتاح','حد الطلب'],low.map(x=>`<tr><td>${E(x.name)}</td><td class="low">${N(x.qty)}</td><td>${N(x.min_qty)}</td><td></td></tr>`)):'<span class="m">كل المنتجات فوق حد الطلب</span>'}</div>`;
+  },
+  sales:()=>inv('sales'),purchases:()=>inv('purchases'),sret:()=>inv('sret'),pret:()=>inv('pret'),
+  async debts(){
+    const [b,pay]=await Promise.all([get(sb.from('customer_balances').select('*').order('balance',{ascending:false})),get(sb.from('payments').select('id,amount,note,by_name,created_at,customers(name)').order('created_at',{ascending:false}).limit(50))]);
+    const tot=b.reduce((a,x)=>a+Math.max(+x.balance,0),0);
+    return `<div class="cards"><div class="card"><small>إجمالي المستحق على العملاء</small><b>${N(tot)}</b></div></div>`
+    +(wr('debts')?`<div class="box"><h2>تحصيل دفعة</h2><form data-k="payment"><label>العميل<select name="customer_id" required>${b.map(x=>`<option value="${x.id}">${E(x.name)} (${N(x.balance)})</option>`).join('')}</select></label>${field('amount','المبلغ','type="number" min="0.01" step="any" required')}${field('note','ملاحظة')}<button class="btn">تسجيل التحصيل</button></form></div>`:'')
+    +`<div class="box"><h2>أرصدة العملاء</h2>${tbl(['العميل','الهاتف','الرصيد'],b.map(x=>`<tr><td>${E(x.name)}</td><td>${E(x.phone)}</td><td class="${x.balance>0?'low':''}">${N(x.balance)}</td><td></td></tr>`))}</div>
+    <div class="box"><h2>آخر التحصيلات</h2>${tbl(['التاريخ','العميل','المبلغ','ملاحظة','بواسطة'],pay.map(x=>`<tr><td>${D8(x.created_at)}</td><td>${E(x.customers?.name)}</td><td>${N(x.amount)}</td><td>${E(x.note)}</td><td>${E(x.by_name)}</td><td>${me.role==='admin'?`<button class="del" data-del="payments:${x.id}">حذف</button>`:''}</td></tr>`))}</div>`;
+  },
+  customers:()=>generic('customers'),suppliers:()=>generic('suppliers'),products:()=>generic('products'),expenses:()=>generic('expenses'),
+  async reports(){
+    const m=await get(sb.from('monthly_report').select('*').order('m',{ascending:false})),t=await get(sb.from('top_products').select('*'));
+    return `<div class="box"><h2>التقرير الشهري</h2>${tbl(['الشهر','المبيعات','المشتريات','المصروفات','الصافي'],m.map(x=>{const n=x.sales-x.purchases-x.expenses;return `<tr><td>${String(x.m).slice(0,7)}</td><td>${N(x.sales)}</td><td>${N(x.purchases)}</td><td>${N(x.expenses)}</td><td class="${n<0?'low':''}">${N(n)}</td><td></td></tr>`}))}</div>
+    <div class="box"><h2>أكثر المنتجات مبيعاً</h2>${tbl(['المنتج','الكمية','القيمة'],t.map(x=>`<tr><td>${E(x.name)}</td><td>${N(x.qty)}</td><td>${N(x.total)}</td><td></td></tr>`))}</div>`;
+  },
+  async users(){
+    const u=await get(sb.from('profiles').select('*').order('name'));
+    return `<div class="box"><h2>المستخدمون</h2><p class="m">المستخدم الجديد يسجّل بنفسه، ثم تفعّله وتحدد صلاحيته من هنا.</p>${tbl(['الاسم','الصلاحية','مفعّل'],u.map(x=>`<tr><td>${E(x.name)}</td><td><select data-role="${x.id}" ${x.id===me.id?'disabled':''}>${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${k===x.role?'selected':''}>${v}</option>`).join('')}</select></td><td><input type="checkbox" data-act="${x.id}" ${x.active?'checked':''} ${x.id===me.id?'disabled':''}></td><td></td></tr>`))}</div>`;
+  }
+};
+async function generic(k){
+  const S=SCHEMA[k],show=S.show||S.f,rows=await get(sb.from(k==='products'?'stock':k).select('*').order('created_at',{ascending:false}));
+  const form=wr(k)?`<div class="box"><h2>إضافة</h2><form data-k="${k}">${S.f.map(f=>field(f[0],f[1],f[2]?'type="number" step="any" value="0"':'required')).join('')}<button class="btn">حفظ</button></form></div>`:'';
+  return form+`<div class="box"><h2>${S.t} (${rows.length})</h2>${tbl(show.map(f=>f[1]),rows.map(r=>`<tr>${show.map(f=>`<td${k==='products'&&f[0]==='qty'&&r.qty<=r.min_qty?' class="low"':''}>${f[2]?N(r[f[0]]):E(r[f[0]])}</td>`).join('')}${del(k,r.id)}</tr>`))}</div>`;
+}
+async function inv(t){
+  const c=IV[t],w=wr(t),cr=cart[t];
+  const [pt,l]=await Promise.all([get(sb.from(c.party).select('id,name').order('name')),get(sb.from(c.tbl).select(`id,no,created_at,total,by_name,${c.party}(name),${c.items}(qty,price,products(name))`).order('created_at',{ascending:false}).limit(100))]);
+  P=await get(sb.from('stock').select('id,name,price,cost,qty').order('name'));LAST=l;
+  const add=w?`<div class="box"><h2>إضافة ${c.nm}</h2>
+   <label style="max-width:300px">${c.lab}<select id="party"><option value="">بدون</option>${pt.map(x=>`<option value="${x.id}" ${x.id===cr.party?'selected':''}>${E(x.name)}</option>`).join('')}</select></label><br>
+   <form data-k="additem" data-t="${t}"><label>المنتج<select name="p" required>${opts(P,p=>` (متاح ${N(p.qty)})`)}</select></label>
+   ${field('q','الكمية','type="number" min="0.01" step="any" value="1" required')}${field('pr',c.unit+' (فارغ = الافتراضي)','type="number" step="any"')}<button class="btn">إضافة للفاتورة</button></form>
+   ${cr.items.length?tbl(['الصنف','الكمية','السعر','الإجمالي'],cr.items.map((x,i)=>`<tr><td>${E(x.name)}</td><td>${N(x.q)}</td><td>${N(x.pr)}</td><td>${N(x.q*x.pr)}</td><td><button class="del" data-rm="${t}:${i}">إزالة</button></td></tr>`))+`<p><b>الإجمالي: ${N(cr.items.reduce((a,x)=>a+x.q*x.pr,0))}</b></p>${t==='sales'?`<label style="max-width:200px">المدفوع الآن<input id="paid" type="number" min="0" step="any" value="${cr.paid}"></label>`:''}<button class="btn" data-save="${t}">حفظ</button>`:''}</div>`:'';
+  return add+`<div class="box"><h2>السجل</h2>${tbl(['الرقم','التاريخ',c.lab,'الأصناف','الإجمالي','بواسطة'],l.map(r=>`<tr><td>${r.no}</td><td>${D8(r.created_at)}</td><td>${E(r[c.party]?.name||'—')}</td><td>${(r[c.items]||[]).map(i=>E(i.products?.name)+'×'+N(i.qty)).join('، ')}</td><td>${N(r.total)}</td><td>${E(r.by_name)}</td><td><button class="pr" data-print="${r.id}">طباعة</button>${me.role==='admin'?`<button class="del" data-del="${c.tbl}:${r.id}">حذف</button>`:''}</td></tr>`))}</div>`;
+}
+function printInv(id){
+  const c=IV[tab],r=LAST.find(x=>x.id===id),w=window.open('','_blank');if(!r||!w)return alert('اسمح بالنوافذ المنبثقة للطباعة');
+  w.document.write(`<html dir="rtl" lang="ar"><meta charset="utf-8"><title>${r.no}</title><body style="font-family:Tahoma,Arial;max-width:640px;margin:30px auto"><h2>${c.nm} رقم ${r.no}</h2><p>التاريخ: ${D8(r.created_at)}<br>${c.lab}: ${E(r[c.party]?.name||'—')}<br>بواسطة: ${E(r.by_name)}</p><table style="width:100%;border-collapse:collapse" border="1" cellpadding="8"><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr>${(r[c.items]||[]).map(i=>`<tr><td>${E(i.products?.name)}</td><td>${N(i.qty)}</td><td>${N(i.price)}</td><td>${N(i.qty*i.price)}</td></tr>`).join('')}</table><h3>الإجمالي: ${N(r.total)}</h3><script>onload=()=>print()<\/script></body></html>`);
+  w.document.close();
+}
+
+/* ---------- shell & auth ---------- */
+let ch=null,pend=false,tm=0;
+function watch(){
+  if(ch)return;
+  ch=sb.channel('db').on('postgres_changes',{event:'*',schema:'public'},()=>{
+    if(!me||!me.active)return;
+    if(document.activeElement?.matches('input,select')){pend=true;return}
+    clearTimeout(tm);tm=setTimeout(render,600);
+  }).subscribe();
+}
+document.addEventListener('focusout',()=>{if(pend){pend=false;setTimeout(()=>{if(!document.activeElement?.matches('input,select'))render()},800)}});
+async function render(){$('#app').innerHTML='<p class="m">جاري التحميل…</p>';$('#app').innerHTML=await V[tab]();}
+function draw(){
+  $('#who').textContent=me?`${me.name} (${ROLES[me.role]})`:'';$('#out').hidden=!me;
+  if(CFG.URL.includes('YOUR-PROJECT')){$('#app').innerHTML='<div class="box auth">ضع Project URL و anon key في أول سكربت داخل index.html.</div>';return}
+  if(!me){$('#nav').innerHTML='';const s=mode==='signup';
+    $('#app').innerHTML=`<div class="box auth"><h2>${s?'إنشاء حساب':'تسجيل الدخول'}</h2><form data-k="${s?'signup':'login'}">${s?field('name','الاسم','required'):''}${field('email','البريد الإلكتروني','type="email" required')}${field('pass','كلمة المرور (6 أحرف على الأقل)','type="password" minlength="6" required')}<button class="btn">${s?'تسجيل':'دخول'}</button></form><button class="lk" data-mode="${s?'login':'signup'}">${s?'لدي حساب':'حساب جديد'}</button><p class="m">أول حساب يُسجَّل يصبح المدير. باقي الحسابات تحتاج تفعيل منه.</p></div>`;return}
+  if(!me.active){$('#nav').innerHTML='';$('#app').innerHTML='<div class="box auth">حسابك بانتظار موافقة المدير. حدّث الصفحة بعد التفعيل.</div>';return}
+  if(!can(tab))tab='dash';
+  $('#nav').innerHTML=TABS.filter(t=>can(t[0])).map(t=>`<button data-tab="${t[0]}" class="${t[0]===tab?'on':''}">${t[1]}</button>`).join('');
+  watch();render();
+}
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  me=null;
+  if(session){const {data}=await sb.from('profiles').select('*').eq('id',session.user.id).maybeSingle();me=data}
+  draw();
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',async e=>{
+  const g=a=>e.target.closest(`[data-${a}]`)?.dataset[a];
+  if(g('mode')){mode=g('mode');draw();return}
+  if(g('tab')){tab=g('tab');draw();return}
+  if(g('print')){printInv(g('print'));return}
+  if(g('rm')){const [t,i]=g('rm').split(':');cart[t].items.splice(+i,1);render();return}
+  if(g('save')){
+    const t=g('save'),cr=cart[t];if(!cr.items.length)return;
+    if(await run(sb.rpc(IV[t].rpc,{party:cr.party||null,items:cr.items.map(x=>({product_id:x.id,qty:x.q,price:x.pr})),...(t==='sales'?{paid:+cr.paid||0}:{})}))){cart[t]={items:[],party:'',paid:''};render()}
+    return}
+  if(g('del')&&confirm('تأكيد الحذف؟')){const [k,id]=g('del').split(':');if(await run(sb.from(k).delete().eq('id',id)))render()}
+});
+document.addEventListener('change',async e=>{
+  const t=e.target;
+  if(t.id==='party')cart[tab].party=t.value;
+  if(t.id==='paid')cart[tab].paid=t.value;
+  if(t.dataset.role)await run(sb.from('profiles').update({role:t.value}).eq('id',t.dataset.role));
+  if(t.dataset.act)await run(sb.from('profiles').update({active:t.checked}).eq('id',t.dataset.act));
+});
+document.addEventListener('submit',async e=>{
+  const f=e.target,k=f.dataset.k;if(!k)return;e.preventDefault();
+  const v=Object.fromEntries(new FormData(f));
+  if(k==='login'){const {error}=await sb.auth.signInWithPassword({email:v.email,password:v.pass});if(error)return alert(error.message);boot();return}
+  if(k==='signup'){
+    const {data,error}=await sb.auth.signUp({email:v.email,password:v.pass,options:{data:{name:v.name}}});if(error)return alert(error.message);
+    if(!data.session){alert('تم التسجيل. أكّد بريدك الإلكتروني ثم سجّل الدخول.');mode='login';draw();return}
+    boot();return}
+  if(k==='additem'){
+    const p=P.find(x=>x.id===v.p),c=IV[f.dataset.t];if(!p)return;
+    cart[f.dataset.t].items.push({id:p.id,name:p.name,q:+v.q,pr:v.pr===''?+p[c.pr]:+v.pr});render();return}
+  if(k==='payment'){if(await run(sb.from('payments').insert({customer_id:v.customer_id,amount:+v.amount,note:v.note,by_name:me.name})))render();return}
+  const o={};SCHEMA[k].f.forEach(x=>o[x[0]]=x[2]?+v[x[0]]||0:v[x[0]]);
+  if(k==='expenses')o.by_name=me.name;
+  if(await run(sb.from(k).insert(o)))render();
+});
+$('#out').onclick=async()=>{await sb.auth.signOut();await sb.removeAllChannels();ch=null;me=null;draw()};
+boot();
+</script>
+</body>
+</html>
